@@ -277,6 +277,7 @@ const App = () => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let aiResponse = '';
+        let buffer = '';  // Buffer for incomplete lines
         let statusMsg = '';
 
         // Add placeholder for AI response
@@ -286,12 +287,22 @@ const App = () => {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n\n');
-
-          for (const line of lines) {
+          // Append new chunk to buffer
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Process complete lines (ending with \n\n)
+          const parts = buffer.split('\n\n');
+          
+          // Keep the last incomplete part in buffer
+          buffer = parts[parts.length - 1];
+          
+          // Process all complete parts
+          for (let i = 0; i < parts.length - 1; i++) {
+            const line = parts[i].trim();
+            if (!line) continue;
+            
             if (line.startsWith('data: ')) {
-              // LLM response data
+              // LLM response data - accumulate chunks
               const content = line.substring(6).replace(/\\n/g, '\n');
               aiResponse += content;
               setChatHistory(prev => {
@@ -306,11 +317,25 @@ const App = () => {
               statusMsg = line.substring(8);
               console.log('Status:', statusMsg);
             } else if (line.startsWith('final: ')) {
-              // Final response
-              const finalContent = line.substring(7);
-              if (finalContent && finalContent !== 'No response') {
+              // Final response - use only if we don't have streaming data
+              const finalContent = line.substring(7).trim();
+              if (finalContent && finalContent !== 'No response' && !aiResponse) {
                 aiResponse = finalContent;
               }
+            }
+          }
+        }
+
+        // Process any remaining buffer content
+        if (buffer.trim()) {
+          const line = buffer.trim();
+          if (line.startsWith('data: ')) {
+            const content = line.substring(6).replace(/\\n/g, '\n');
+            aiResponse += content;
+          } else if (line.startsWith('final: ')) {
+            const finalContent = line.substring(7).trim();
+            if (finalContent && !aiResponse) {
+              aiResponse = finalContent;
             }
           }
         }
